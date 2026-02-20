@@ -238,6 +238,7 @@ ensure_postgres() {
       fail "Unable to locate pg_hba.conf for passwordless configuration."
     fi
     local db_user_regex
+    local db_name_regex
     local hba_mode
     local hba_owner
     local hba_group
@@ -250,14 +251,14 @@ ensure_postgres() {
     local hba_peer_rule_pattern
     local grep_status
     db_user_regex="$(printf '%s' "$DB_USER" | sed 's/[][\\.^$*+?()|{}]/\\\\&/g')"
+    db_name_regex="$(printf '%s' "$DB_NAME" | sed 's/[][\\.^$*+?()|{}]/\\\\&/g')"
     hba_mode="$(stat -c %a "$hba_file")"
     hba_owner="$(stat -c %u "$hba_file")"
     hba_group="$(stat -c %g "$hba_file")"
     hba_tmp="$(mktemp)"
     hba_base="$(mktemp)"
-    # Detect a general peer rule or a DB_USER-specific peer rule to avoid unnecessary changes.
-    # Matching "all" is acceptable since the fallback rule we add is also "local all all peer".
-    hba_peer_rule_pattern="^local[[:space:]]+all[[:space:]]+(all|${db_user_regex})[[:space:]]+peer([[:space:]]|$)"
+    # Detect a peer rule that would allow DB_USER to connect to DB_NAME without adding duplicates.
+    hba_peer_rule_pattern="^local[[:space:]]+(all|${db_name_regex})[[:space:]]+(all|${db_user_regex})[[:space:]]+peer([[:space:]]|$)"
     # Use \\( and \\) to match the literal parentheses in the marker comment.
     hba_comment_patterns=(
       "^[[:space:]]*#.*n8n passwordless access"
@@ -278,15 +279,22 @@ ensure_postgres() {
       fail "Failed to filter pg_hba.conf rules (grep exit: $grep_status)."
     fi
     if ! grep -q -E "$hba_peer_rule_pattern" "$hba_base"; then
-      # Add general peer auth for local socket connections if no such rule exists.
-      # This enables local peer auth for all users; tighten it (i.e., local all ${DB_USER} peer) if needed.
-      log "WARNING: Added general local peer auth rule (local all all peer)."
-      log "WARNING: Any local system user with a matching PostgreSQL role can access any database."
-      log "WARNING: Tighten to: local all ${DB_USER} peer."
-      cat > "$hba_tmp" <<EOF
+      # Add peer auth for local socket connections if no such rule exists.
+      if [[ "$DB_PASSWORDLESS_ALLOW_ALL_PEER" == "true" ]]; then
+        log "WARNING: Added general local peer auth rule (local all all peer)."
+        log "WARNING: Any local system user with a matching PostgreSQL role can access any database."
+        log "WARNING: Tighten to: local ${DB_NAME} ${DB_USER} peer."
+        cat > "$hba_tmp" <<EOF
 # local socket peer authentication (migration script)
 local all all peer
 EOF
+      else
+        log "Adding local peer auth rule for ${DB_NAME} and ${DB_USER}."
+        cat > "$hba_tmp" <<EOF
+# local socket peer authentication (migration script)
+local ${DB_NAME} ${DB_USER} peer
+EOF
+      fi
       cat "$hba_base" >> "$hba_tmp"
     else
       cat "$hba_base" > "$hba_tmp"
@@ -404,6 +412,7 @@ DB_HOST="${DB_POSTGRESDB_HOST:-$DEFAULT_DB_HOST}"
 DB_PORT="${DB_POSTGRESDB_PORT:-$DEFAULT_DB_PORT}"
 DB_SCHEMA="${DB_POSTGRESDB_SCHEMA:-$DEFAULT_DB_SCHEMA}"
 DB_PASSWORDLESS="${DB_PASSWORDLESS:-$DEFAULT_DB_PASSWORDLESS}"
+DB_PASSWORDLESS_ALLOW_ALL_PEER="${DB_PASSWORDLESS_ALLOW_ALL_PEER:-false}"
 
 if [[ "$DB_PASSWORDLESS" == "true" ]]; then
   DB_PASSWORD=""

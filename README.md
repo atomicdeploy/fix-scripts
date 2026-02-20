@@ -35,5 +35,6 @@ Set any of these environment variables before running the script if you need to 
 - `LOG_FILE` – migration log location (default: `/var/log/n8n-postgres-migration.log`)
 - `N8N_PORT_HOST` – host for port checks (default: `127.0.0.1`)
 - `DB_PASSWORDLESS` – set to `true` for PostgreSQL passwordless mode (default: `true`)
+- `DB_PASSWORDLESS_ALLOW_ALL_PEER` – set to `true` to insert `local all all peer` in `pg_hba.conf` (default: `false`; default inserts `local <DB_NAME> <DB_USER> peer`)
 
-When `DB_PASSWORDLESS=true`, the script switches to the local PostgreSQL socket (`/var/run/postgresql`), removes any legacy n8n-specific `pg_hba.conf` block, ensures a general `local all all peer` rule exists (added at the top if missing), and temporarily grants superuser for the import step before revoking it.
+When `DB_PASSWORDLESS=true`, the script switches to the local PostgreSQL socket (`/var/run/postgresql`), removes any legacy n8n-specific `pg_hba.conf` block, and ensures a peer-auth rule exists. By default it adds `local <DB_NAME> <DB_USER> peer`; set `DB_PASSWORDLESS_ALLOW_ALL_PEER=true` to insert `local all all peer`. The script temporarily grants superuser for the import step before revoking it.
