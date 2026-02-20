@@ -47,9 +47,10 @@ The server can expose phpPgAdmin via Apache using the same alias pattern as phpM
 - **Document root**: `/usr/share/phppgadmin`
 - **Apache config**: `/etc/apache2/conf-available/phppgadmin.conf`
 
-If you need to allow remote access, update the Apache config to remove the `Require local` restriction and reload Apache:
+If you need to allow remote access, update the Apache config to replace `Require local` with a restricted IP range (recommended). Only use `Require all granted` if you explicitly accept the security risk.
 
 ```bash
-sudo sed -i 's/^Require local/Require all granted/' /etc/apache2/conf-available/phppgadmin.conf
+sudo sed -i 's/^Require local/Require ip 203.0.113.0\\/24/' /etc/apache2/conf-available/phppgadmin.conf
+sudo apache2ctl configtest
 sudo systemctl reload apache2
 ```
