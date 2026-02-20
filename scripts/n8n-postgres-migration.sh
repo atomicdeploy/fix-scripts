@@ -244,21 +244,24 @@ ensure_postgres() {
     local hba_tmp
     local hba_base
     local hba_filter_pattern
+    local hba_peer_rule_pattern
     db_user_regex="$(printf '%s' "$DB_USER" | sed 's/[][\\.^$*+?()|{}]/\\\\&/g')"
     hba_mode="$(stat -c %a "$hba_file")"
     hba_owner="$(stat -c %u "$hba_file")"
     hba_group="$(stat -c %g "$hba_file")"
     hba_tmp="$(mktemp)"
     hba_base="$(mktemp)"
+    hba_peer_rule_pattern='^local[[:space:]]+all[[:space:]]+all[[:space:]]+peer'
+    # Escaped parentheses keep grep -E literal for the migration script marker.
     hba_filter_pattern="n8n passwordless access|local socket peer authentication \\(migration script\\)"
     hba_filter_pattern+="|^local[[:space:]]+all[[:space:]]+${db_user_regex}[[:space:]]+(peer|trust)"
     hba_filter_pattern+="|^host[[:space:]]+all[[:space:]]+${db_user_regex}[[:space:]]+127\\.0\\.0\\.1/32[[:space:]]+trust"
     hba_filter_pattern+="|^host[[:space:]]+all[[:space:]]+${db_user_regex}[[:space:]]+::1/128[[:space:]]+trust"
     if ! grep -v -E "$hba_filter_pattern" "$hba_file" > "$hba_base"; then
       rm -f "$hba_tmp" "$hba_base"
-      fail "Failed to update pg_hba.conf."
+      fail "Failed to filter pg_hba.conf rules."
     fi
-    if ! grep -q -E '^local[[:space:]]+all[[:space:]]+all[[:space:]]+peer' "$hba_base"; then
+    if ! grep -q -E "$hba_peer_rule_pattern" "$hba_base"; then
       # Add general peer auth for local socket connections if no such rule exists.
       cat > "$hba_tmp" <<EOF
 # local socket peer authentication (migration script)
