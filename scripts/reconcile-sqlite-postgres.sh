@@ -67,14 +67,26 @@ column_list() {
   sqlite3 "$SQLITE_DB" "PRAGMA table_info(\"$table\");" | awk -F'|' '{print $2}' | paste -sd ',' -
 }
 
+validate_table_name() {
+  local table="$1"
+  if [[ ! "$table" =~ ^[A-Za-z0-9_]+$ ]]; then
+    echo "Unsafe table name detected: $table" >&2
+    exit 1
+  fi
+}
+
 needs_sequence() {
   local table="$1"
+  validate_table_name "$table"
   TABLE="$table" SQLITE_DB="$SQLITE_DB" python - <<'PY'
 import os
 import sqlite3
+import re
 
 db_path = os.environ['SQLITE_DB']
 table = os.environ['TABLE']
+if not re.match(r'^[A-Za-z0-9_]+$', table):
+    raise SystemExit(1)
 conn = sqlite3.connect(db_path)
 rows = conn.execute(f'PRAGMA table_info(\"{table}\")').fetchall()
 for _, name, col_type, _, _, pk in rows:
@@ -95,10 +107,10 @@ ensure_sequence() {
   fi
   local seq_name
   seq_name="${PG_SCHEMA}.\"${table}_id_seq\""
-  runuser -u n8n -- psql -d "$PG_DB" -v ON_ERROR_STOP=1 -c "CREATE SEQUENCE IF NOT EXISTS ${PG_SCHEMA}.\"${table}_id_seq\";"
+  runuser -u n8n -- psql -d "$PG_DB" -v ON_ERROR_STOP=1 -c "CREATE SEQUENCE IF NOT EXISTS ${seq_name};"
   runuser -u n8n -- psql -d "$PG_DB" -v ON_ERROR_STOP=1 -c "ALTER TABLE ${PG_SCHEMA}.\"$table\" ALTER COLUMN id SET DEFAULT nextval('${seq_name}');"
   max_id=$(runuser -u n8n -- psql -d "$PG_DB" -Atc "SELECT COALESCE(MAX(id),0) FROM ${PG_SCHEMA}.\"$table\";")
-  if [[ "$max_id" == "0" ]]; then
+  if [[ "$max_id" -eq 0 ]]; then
     runuser -u n8n -- psql -d "$PG_DB" -v ON_ERROR_STOP=1 -c "SELECT setval('${seq_name}', 1, false);"
   else
     runuser -u n8n -- psql -d "$PG_DB" -v ON_ERROR_STOP=1 -c "SELECT setval('${seq_name}', ${max_id}, true);"
@@ -106,6 +118,7 @@ ensure_sequence() {
 }
 
 for table in "${missing_tables[@]}"; do
+  validate_table_name "$table"
   echo "Creating table $table"
   schema_sql=$(convert_schema "$table")
   runuser -u n8n -- psql -d "$PG_DB" -v ON_ERROR_STOP=1 -c "$schema_sql"
@@ -117,6 +130,7 @@ for table in "${missing_tables[@]}"; do
 done
 
 for table in $sqlite_tables; do
+  validate_table_name "$table"
   sqlite_count=$(sqlite3 "$SQLITE_DB" "SELECT COUNT(*) FROM \"$table\";")
   pg_count=$(runuser -u n8n -- psql -d "$PG_DB" -Atc "SELECT COUNT(*) FROM ${PG_SCHEMA}.\"$table\";")
   if [[ "$pg_count" == "0" && "$sqlite_count" != "0" ]]; then
