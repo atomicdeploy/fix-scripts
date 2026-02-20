@@ -81,5 +81,5 @@ Copy the script from this repo:
 
 ```bash
 scp -i /path/to/key -P 8022 ./scripts/reconcile-sqlite-postgres.sh root@your-host:/tmp/reconcile-sqlite-postgres.sh
-chmod +x /tmp/reconcile-sqlite-postgres.sh
+ssh -i /path/to/key -P 8022 root@your-host "chmod +x /tmp/reconcile-sqlite-postgres.sh"
 ```
