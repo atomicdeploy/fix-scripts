@@ -245,6 +245,8 @@ ensure_postgres() {
     local hba_base
     local hba_filter_pattern
     local hba_filter_parts
+    local hba_comment_patterns
+    local hba_rule_patterns
     local hba_peer_rule_pattern
     local grep_status
     db_user_regex="$(printf '%s' "$DB_USER" | sed 's/[][\\.^$*+?()|{}]/\\\\&/g')"
@@ -255,13 +257,16 @@ ensure_postgres() {
     hba_base="$(mktemp)"
     hba_peer_rule_pattern="^local[[:space:]]+all[[:space:]]+(all|${db_user_regex})[[:space:]]+peer"
     # Use \\( and \\) to match the literal parentheses in the marker comment.
-    hba_filter_parts=(
+    hba_comment_patterns=(
       "^[[:space:]]*#.*n8n passwordless access"
       "^[[:space:]]*#.*local socket peer authentication \\(migration script\\)"
+    )
+    hba_rule_patterns=(
       "^local[[:space:]]+all[[:space:]]+${db_user_regex}[[:space:]]+(peer|trust)"
       "^host[[:space:]]+all[[:space:]]+${db_user_regex}[[:space:]]+127\\.0\\.0\\.1/32[[:space:]]+trust"
       "^host[[:space:]]+all[[:space:]]+${db_user_regex}[[:space:]]+::1/128[[:space:]]+trust"
     )
+    hba_filter_parts=("${hba_comment_patterns[@]}" "${hba_rule_patterns[@]}")
     hba_filter_pattern="$(IFS='|'; echo "${hba_filter_parts[*]}")"
     grep -v -E "$hba_filter_pattern" "$hba_file" > "$hba_base"
     grep_status=$?
@@ -271,7 +276,7 @@ ensure_postgres() {
     fi
     if ! grep -q -E "$hba_peer_rule_pattern" "$hba_base"; then
       # Add general peer auth for local socket connections if no such rule exists.
-      # This enables local peer auth for all users; tighten it if your policy requires.
+      # This enables local peer auth for all users; tighten it (e.g., local all ${DB_USER} peer) if needed.
       cat > "$hba_tmp" <<EOF
 # local socket peer authentication (migration script)
 local all all peer
