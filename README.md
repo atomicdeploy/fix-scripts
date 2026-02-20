@@ -55,10 +55,10 @@ sudo apache2ctl configtest
 sudo systemctl reload apache2
 ```
 
-To allow login with administrative accounts (e.g., `postgres`), disable phpPgAdmin's extra login security and set a password:
+To allow login with administrative accounts (e.g., `postgres`), disable phpPgAdmin's extra login security and set a password. This weakens protection against brute-force logins, so only do this in trusted environments.
 
 ```bash
 sudo sed -i "s/\\$conf\\['extra_login_security'\\] = true;/\\$conf['extra_login_security'] = false;/" /etc/phppgadmin/config.inc.php
-sudo -u postgres psql -c "ALTER USER postgres WITH PASSWORD '<set-a-strong-password>';"
+sudo -u postgres psql -c "ALTER USER postgres WITH PASSWORD 'YOUR_STRONG_PASSWORD_HERE';"
 sudo systemctl reload apache2
 ```
