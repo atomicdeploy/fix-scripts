@@ -34,3 +34,6 @@ Set any of these environment variables before running the script if you need to 
 - `ENV_FILE` – path to the n8n `.env` file
 - `LOG_FILE` – migration log location (default: `/var/log/n8n-postgres-migration.log`)
 - `N8N_PORT_HOST` – host for port checks (default: `127.0.0.1`)
+- `DB_PASSWORDLESS` – set to `true` for PostgreSQL passwordless mode (default: `true`)
+
+When `DB_PASSWORDLESS=true`, the script updates `pg_hba.conf` to trust local connections for the n8n user (passwordless) and temporarily grants superuser for the import step before revoking it.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 IFS=$'\n\t'
 
 LOG_FILE="${LOG_FILE:-/var/log/n8n-postgres-migration.log}"
@@ -7,6 +7,7 @@ DEFAULT_DB_NAME="n8n"
 DEFAULT_DB_HOST="localhost"
 DEFAULT_DB_PORT="5432"
 DEFAULT_DB_SCHEMA="n8n"
+DEFAULT_DB_PASSWORDLESS="true"
 
 mkdir -p "$(dirname "$LOG_FILE")"
 touch "$LOG_FILE"
@@ -29,6 +30,14 @@ fi
 
 command_exists() {
   command -v "$1" >/dev/null 2>&1
+}
+
+pg_quote_identifier() {
+  printf '"%s"' "${1//\"/\"\"}"
+}
+
+pg_quote_literal() {
+  printf "'%s'" "${1//\'/\'\'}"
 }
 
 strip_quotes() {
@@ -78,6 +87,8 @@ ENV_FILE_LINE="$(printf '%s\n' "$ENV_FILE_LINE" | awk '{print $1}')"
 
 SERVICE_USER="$(systemctl show "$SERVICE_NAME" -p User --value)"
 SERVICE_USER="${SERVICE_USER:-root}"
+SERVICE_GROUP="$(systemctl show "$SERVICE_NAME" -p Group --value)"
+SERVICE_GROUP="${SERVICE_GROUP:-$SERVICE_USER}"
 
 if [[ -n "${EXEC_START_LINE:-}" ]]; then
   read -r -a EXEC_TOKENS <<< "$EXEC_START_LINE"
@@ -143,7 +154,20 @@ run_n8n_cli() {
   if [[ "$SERVICE_USER" == "root" ]]; then
     (load_env; "$N8N_BIN" "${args[@]}")
   else
-    runuser -u "$SERVICE_USER" -- bash -c 'set -a; [ -f "$1" ] && . "$1"; set +a; shift; exec "$@"' bash "$ENV_FILE" "$N8N_BIN" "${args[@]}"
+    local command_str
+    command_str="$(printf '%q ' "$N8N_BIN" "${args[@]}")"
+    runuser -u "$SERVICE_USER" -- bash -c "set -a; [ -f \"$ENV_FILE\" ] && . \"$ENV_FILE\"; set +a; $command_str"
+  fi
+}
+
+run_n8n_cli_sqlite_export() {
+  local args=("$@")
+  local command_str
+  command_str="$(printf '%q ' "$N8N_BIN" "${args[@]}")"
+  if [[ "$SERVICE_USER" == "root" ]]; then
+    (load_env; DB_TYPE=sqlite DB_SQLITE_DATABASE="$SQLITE_DB_PATH" $command_str)
+  else
+    runuser -u "$SERVICE_USER" -- bash -c "set -a; [ -f \"$ENV_FILE\" ] && . \"$ENV_FILE\"; set +a; DB_TYPE=sqlite DB_SQLITE_DATABASE=\"$SQLITE_DB_PATH\" $command_str"
   fi
 }
 
@@ -167,22 +191,66 @@ ensure_postgres() {
     systemctl start postgresql
   fi
 
+  local db_user_ident
+  local db_name_ident
+  local db_schema_ident
+  db_user_ident="$(pg_quote_identifier "$DB_USER")"
+  db_name_ident="$(pg_quote_identifier "$DB_NAME")"
+  db_schema_ident="$(pg_quote_identifier "$DB_SCHEMA")"
+
   if ! runuser -u postgres -- psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='${DB_USER}'" | grep -q 1; then
     log "Creating PostgreSQL role ${DB_USER}."
-    runuser -u postgres -- psql -v ON_ERROR_STOP=1 -v "db_user=${DB_USER}" -v "db_pass=${DB_PASSWORD}" -c "CREATE USER :\"db_user\" WITH PASSWORD :'db_pass';"
+    if [[ "$DB_PASSWORDLESS" == "true" ]]; then
+      runuser -u postgres -- psql -v ON_ERROR_STOP=1 -c "CREATE USER ${db_user_ident};"
+    else
+      local db_pass_literal
+      db_pass_literal="$(pg_quote_literal "$DB_PASSWORD")"
+      runuser -u postgres -- psql -v ON_ERROR_STOP=1 -c "CREATE USER ${db_user_ident} WITH PASSWORD ${db_pass_literal};"
+    fi
   else
     log "PostgreSQL role ${DB_USER} already exists."
+    if [[ "$DB_PASSWORDLESS" == "true" ]]; then
+      runuser -u postgres -- psql -v ON_ERROR_STOP=1 -c "ALTER USER ${db_user_ident} PASSWORD NULL;"
+    fi
   fi
 
   if ! runuser -u postgres -- psql -tAc "SELECT 1 FROM pg_database WHERE datname='${DB_NAME}'" | grep -q 1; then
     log "Creating PostgreSQL database ${DB_NAME}."
-    runuser -u postgres -- psql -v ON_ERROR_STOP=1 -v "db_name=${DB_NAME}" -c "CREATE DATABASE :\"db_name\";"
+    runuser -u postgres -- psql -v ON_ERROR_STOP=1 -c "CREATE DATABASE ${db_name_ident};"
   else
     log "PostgreSQL database ${DB_NAME} already exists."
   fi
 
-  runuser -u postgres -- psql -v ON_ERROR_STOP=1 -v "db_name=${DB_NAME}" -v "db_user=${DB_USER}" -c "GRANT ALL PRIVILEGES ON DATABASE :\"db_name\" TO :\"db_user\";"
-  runuser -u postgres -- psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -v "db_schema=${DB_SCHEMA}" -v "db_user=${DB_USER}" -c "CREATE SCHEMA IF NOT EXISTS :\"db_schema\" AUTHORIZATION :\"db_user\";"
+  runuser -u postgres -- psql -v ON_ERROR_STOP=1 -c "GRANT ALL PRIVILEGES ON DATABASE ${db_name_ident} TO ${db_user_ident};"
+  runuser -u postgres -- psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -c "CREATE SCHEMA IF NOT EXISTS ${db_schema_ident} AUTHORIZATION ${db_user_ident};"
+
+  if [[ "$DB_PASSWORDLESS" == "true" ]]; then
+    local hba_file
+    hba_file="$(runuser -u postgres -- psql -tAc "SHOW hba_file")"
+    if [[ -z "$hba_file" ]]; then
+      fail "Unable to locate pg_hba.conf for passwordless configuration."
+    fi
+    local hba_mode
+    local hba_owner
+    local hba_group
+    local hba_tmp
+    hba_mode="$(stat -c %a "$hba_file")"
+    hba_owner="$(stat -c %u "$hba_file")"
+    hba_group="$(stat -c %g "$hba_file")"
+    hba_tmp="$(mktemp)"
+    cat > "$hba_tmp" <<EOF
+# n8n passwordless access
+local all ${DB_USER} trust
+host all ${DB_USER} 127.0.0.1/32 trust
+host all ${DB_USER} ::1/128 trust
+EOF
+    grep -v -E "n8n passwordless access|^local[[:space:]]+all[[:space:]]+${DB_USER}[[:space:]]+trust|^host[[:space:]]+all[[:space:]]+${DB_USER}[[:space:]]+127\\.0\\.0\\.1/32[[:space:]]+trust|^host[[:space:]]+all[[:space:]]+${DB_USER}[[:space:]]+::1/128[[:space:]]+trust" "$hba_file" >> "$hba_tmp"
+    cat "$hba_tmp" > "$hba_file"
+    chown "$hba_owner:$hba_group" "$hba_file"
+    chmod "$hba_mode" "$hba_file"
+    rm -f "$hba_tmp"
+    systemctl reload postgresql
+  fi
 }
 
 find_sqlite_db() {
@@ -202,6 +270,43 @@ find_sqlite_db() {
   fi
 
   find "$N8N_DIR" "$USER_HOME" -maxdepth 4 -name database.sqlite 2>/dev/null | head -n 1 || true
+}
+
+ensure_sqlite_secrets_table() {
+  local db_path="$1"
+  if [[ -z "$db_path" || ! -f "$db_path" ]]; then
+    return
+  fi
+  if ! command_exists sqlite3; then
+    log "sqlite3 not found; skipping SQLite table checks."
+    return
+  fi
+  if ! sqlite3 "$db_path" "SELECT name FROM sqlite_master WHERE type='table' AND name='secrets_provider_connection';" | grep -q secrets_provider_connection; then
+    log "Creating missing secrets_provider_connection table in SQLite."
+    sqlite3 "$db_path" <<'SQL'
+CREATE TABLE IF NOT EXISTS secrets_provider_connection (
+  providerKey TEXT PRIMARY KEY,
+  type TEXT NOT NULL,
+  encryptedSettings TEXT,
+  isEnabled BOOLEAN NOT NULL DEFAULT 0,
+  createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+SQL
+  fi
+
+  if ! sqlite3 "$db_path" "SELECT name FROM sqlite_master WHERE type='table' AND name='project_secrets_provider_access';" | grep -q project_secrets_provider_access; then
+    log "Creating missing project_secrets_provider_access table in SQLite."
+    sqlite3 "$db_path" <<'SQL'
+CREATE TABLE IF NOT EXISTS project_secrets_provider_access (
+  providerKey TEXT NOT NULL,
+  projectId TEXT NOT NULL,
+  createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (providerKey, projectId)
+);
+SQL
+  fi
 }
 
 TIMESTAMP="$(date '+%Y%m%d-%H%M%S')"
@@ -232,24 +337,41 @@ if [[ -d "$N8N_USER_FOLDER" && "$N8N_USER_FOLDER" != "$N8N_DIR" && "$N8N_USER_FO
   fi
 fi
 
+SQLITE_DB_PATH="$(find_sqlite_db)"
+ensure_sqlite_secrets_table "$SQLITE_DB_PATH"
+
 log "Exporting n8n entities to $EXPORT_DIR."
 mkdir -p "$EXPORT_DIR"
-run_n8n_cli export:entities --outputDir="$EXPORT_DIR" --includeExecutionHistoryDataTables=true
+chown -R "$SERVICE_USER":"$SERVICE_GROUP" "$EXPORT_DIR"
+EXPORT_CMD="run_n8n_cli"
+if [[ "${DB_TYPE:-}" == "postgresdb" && -n "${SQLITE_DB_PATH:-}" ]]; then
+  log "PostgreSQL config detected in .env; overriding to SQLite for export."
+  EXPORT_CMD="run_n8n_cli_sqlite_export"
+fi
+if ! $EXPORT_CMD export:entities --outputDir="$EXPORT_DIR" --includeExecutionHistoryDataTables=true 2>&1 | tee -a "$LOG_FILE"; then
+  fail "n8n export:entities failed."
+fi
 
 DB_NAME="${DB_POSTGRESDB_DATABASE:-$DEFAULT_DB_NAME}"
 DB_USER="${DB_POSTGRESDB_USER:-$DEFAULT_DB_NAME}"
 DB_HOST="${DB_POSTGRESDB_HOST:-$DEFAULT_DB_HOST}"
 DB_PORT="${DB_POSTGRESDB_PORT:-$DEFAULT_DB_PORT}"
 DB_SCHEMA="${DB_POSTGRESDB_SCHEMA:-$DEFAULT_DB_SCHEMA}"
+DB_PASSWORDLESS="${DB_PASSWORDLESS:-$DEFAULT_DB_PASSWORDLESS}"
 
-if [[ -n "${DB_POSTGRESDB_PASSWORD:-}" ]]; then
-  DB_PASSWORD="$DB_POSTGRESDB_PASSWORD"
+if [[ "$DB_PASSWORDLESS" == "true" ]]; then
+  DB_PASSWORD=""
+  log "PostgreSQL passwordless mode enabled; no password will be set."
 else
-  read -r -s -p "Enter password for PostgreSQL user ${DB_USER}: " DB_PASSWORD
-  echo
-fi
+  if [[ -n "${DB_POSTGRESDB_PASSWORD:-}" ]]; then
+    DB_PASSWORD="$DB_POSTGRESDB_PASSWORD"
+  else
+    read -r -s -p "Enter password for PostgreSQL user ${DB_USER}: " DB_PASSWORD
+    echo
+  fi
 
-[[ -z "$DB_PASSWORD" ]] && fail "PostgreSQL password cannot be empty."
+  [[ -z "$DB_PASSWORD" ]] && fail "PostgreSQL password cannot be empty."
+fi
 
 ensure_postgres
 
@@ -264,6 +386,12 @@ set_env_value DB_POSTGRESDB_PORT "$DB_PORT"
 set_env_value DB_POSTGRESDB_USER "$DB_USER"
 set_env_value DB_POSTGRESDB_PASSWORD "$DB_PASSWORD"
 set_env_value DB_POSTGRESDB_SCHEMA "$DB_SCHEMA"
+
+log "Ensuring ownership for n8n directories."
+chown -R "$SERVICE_USER":"$SERVICE_GROUP" "$N8N_DIR"
+if [[ -d "$N8N_USER_FOLDER" && "$N8N_USER_FOLDER" != "$N8N_DIR" && "$N8N_USER_FOLDER" != "$N8N_DIR/"* ]]; then
+  chown -R "$SERVICE_USER":"$SERVICE_GROUP" "$N8N_USER_FOLDER"
+fi
 
 log "Starting n8n service."
 systemctl start "$SERVICE_NAME"
@@ -294,12 +422,25 @@ log "Validating n8n CLI availability."
 run_n8n_cli --version >/dev/null
 
 log "Importing entities from $EXPORT_DIR."
-run_n8n_cli import:entities --inputDir "$EXPORT_DIR" --truncateTables true
+IMPORT_SUPERUSER_GRANTED=false
+db_user_ident="$(pg_quote_identifier "$DB_USER")"
+runuser -u postgres -- psql -v ON_ERROR_STOP=1 -c "ALTER USER ${db_user_ident} WITH SUPERUSER;"
+IMPORT_SUPERUSER_GRANTED=true
+if ! run_n8n_cli import:entities --inputDir "$EXPORT_DIR" --truncateTables true 2>&1 | tee -a "$LOG_FILE"; then
+  if [[ "$IMPORT_SUPERUSER_GRANTED" == "true" ]]; then
+    runuser -u postgres -- psql -v ON_ERROR_STOP=1 -c "ALTER USER ${db_user_ident} WITH NOSUPERUSER;"
+  fi
+  fail "n8n import:entities failed."
+fi
+if [[ "$IMPORT_SUPERUSER_GRANTED" == "true" ]]; then
+  runuser -u postgres -- psql -v ON_ERROR_STOP=1 -c "ALTER USER ${db_user_ident} WITH NOSUPERUSER;"
+fi
 
 log "Checking systemd status and recent logs for errors."
 systemctl --no-pager status "$SERVICE_NAME"
-if journalctl -u "$SERVICE_NAME" -n 50 --no-pager | grep -Ei "error|fatal" >/dev/null; then
-  fail "Detected errors in journalctl output."
+SERVICE_START_TIME="$(systemctl show -p ActiveEnterTimestamp --value "$SERVICE_NAME")"
+if [[ -n "$SERVICE_START_TIME" ]] && journalctl -u "$SERVICE_NAME" --since "$SERVICE_START_TIME" --no-pager | grep -Ei "error|fatal" >/dev/null; then
+  fail "Detected errors in journalctl output since service start."
 fi
 
 SQLITE_DB_PATH="$(find_sqlite_db)"
