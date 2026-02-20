@@ -242,20 +242,27 @@ ensure_postgres() {
     local hba_owner
     local hba_group
     local hba_tmp
+    local hba_base
     db_user_regex="$(printf '%s' "$DB_USER" | sed 's/[][\\.^$*+?()|{}]/\\\\&/g')"
     hba_mode="$(stat -c %a "$hba_file")"
     hba_owner="$(stat -c %u "$hba_file")"
     hba_group="$(stat -c %g "$hba_file")"
     hba_tmp="$(mktemp)"
-    cat > "$hba_tmp" <<EOF
-# n8n passwordless access
-local all ${DB_USER} peer
+    hba_base="$(mktemp)"
+    grep -v -E "n8n passwordless access|local socket peer authentication \\(migration script\\)|^local[[:space:]]+all[[:space:]]+${db_user_regex}[[:space:]]+peer|^local[[:space:]]+all[[:space:]]+${db_user_regex}[[:space:]]+trust|^host[[:space:]]+all[[:space:]]+${db_user_regex}[[:space:]]+127\\.0\\.0\\.1/32[[:space:]]+trust|^host[[:space:]]+all[[:space:]]+${db_user_regex}[[:space:]]+::1/128[[:space:]]+trust" "$hba_file" > "$hba_base"
+    if ! grep -q -E '^local[[:space:]]+all[[:space:]]+all[[:space:]]+peer' "$hba_base"; then
+      cat > "$hba_tmp" <<EOF
+# local socket peer authentication (migration script)
+local all all peer
 EOF
-    grep -v -E "n8n passwordless access|^local[[:space:]]+all[[:space:]]+${db_user_regex}[[:space:]]+peer" "$hba_file" >> "$hba_tmp"
+      cat "$hba_base" >> "$hba_tmp"
+    else
+      cat "$hba_base" > "$hba_tmp"
+    fi
     cat "$hba_tmp" > "$hba_file"
     chown "$hba_owner:$hba_group" "$hba_file"
     chmod "$hba_mode" "$hba_file"
-    rm -f "$hba_tmp"
+    rm -f "$hba_tmp" "$hba_base"
     systemctl reload postgresql
   fi
 }

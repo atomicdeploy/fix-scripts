@@ -36,4 +36,4 @@ Set any of these environment variables before running the script if you need to 
 - `N8N_PORT_HOST` – host for port checks (default: `127.0.0.1`)
 - `DB_PASSWORDLESS` – set to `true` for PostgreSQL passwordless mode (default: `true`)
 
-When `DB_PASSWORDLESS=true`, the script switches to the local PostgreSQL socket (`/var/run/postgresql`), updates `pg_hba.conf` to allow peer authentication for the n8n user, and temporarily grants superuser for the import step before revoking it.
+When `DB_PASSWORDLESS=true`, the script switches to the local PostgreSQL socket (`/var/run/postgresql`), removes any legacy n8n-specific `pg_hba.conf` block, ensures a general `local all all peer` rule exists (added at the top if missing), and temporarily grants superuser for the import step before revoking it.
