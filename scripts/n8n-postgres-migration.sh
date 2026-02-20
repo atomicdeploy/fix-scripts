@@ -258,7 +258,7 @@ ensure_postgres() {
     hba_tmp="$(mktemp)"
     hba_base="$(mktemp)"
     # Detect a peer rule that would allow DB_USER to connect to DB_NAME without adding duplicates.
-    hba_peer_rule_pattern="^local[[:space:]]+(all|${db_name_regex})[[:space:]]+(all|${db_user_regex})[[:space:]]+peer([[:space:]]|$)"
+    hba_peer_rule_pattern="^local[[:space:]]+(all|${db_name_regex})[[:space:]]+(all|${db_user_regex})[[:space:]]+peer[[:space:]]*$"
     # Use \\( and \\) to match the literal parentheses in the marker comment.
     hba_comment_patterns=(
       "^[[:space:]]*#.*n8n passwordless access"
@@ -283,13 +283,13 @@ ensure_postgres() {
       if [[ "$DB_PASSWORDLESS_ALLOW_ALL_PEER" == "true" ]]; then
         log "WARNING: Added general local peer auth rule (local all all peer)."
         log "WARNING: Any local system user with a matching PostgreSQL role can access any database."
-        log "WARNING: Tighten to: local ${DB_NAME} ${DB_USER} peer."
+        log "WARNING: Tighten to: local \"${DB_NAME}\" \"${DB_USER}\" peer."
         cat > "$hba_tmp" <<EOF
 # local socket peer authentication (migration script)
 local all all peer
 EOF
       else
-        log "Adding local peer auth rule for ${DB_NAME} and ${DB_USER}."
+        log "Adding local peer auth rule for \"${DB_NAME}\" and \"${DB_USER}\"."
         cat > "$hba_tmp" <<EOF
 # local socket peer authentication (migration script)
 local ${DB_NAME} ${DB_USER} peer
