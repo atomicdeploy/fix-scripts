@@ -38,3 +38,18 @@ Set any of these environment variables before running the script if you need to 
 - `DB_PASSWORDLESS_ALLOW_ALL_PEER` – set to `true` to insert `local all all peer` in `pg_hba.conf` (default: `false`; default inserts `local <DB_NAME> <DB_USER> peer`)
 
 When `DB_PASSWORDLESS=true`, the script switches to the local PostgreSQL socket (`/var/run/postgresql`), removes any legacy n8n-specific `pg_hba.conf` block, and ensures a peer-auth rule exists. By default it adds `local <DB_NAME> <DB_USER> peer`; set `DB_PASSWORDLESS_ALLOW_ALL_PEER=true` to insert `local all all peer`. The script temporarily grants superuser for the import step before revoking it.
+
+## PostgreSQL web UI (phpPgAdmin)
+
+The server can expose phpPgAdmin via Apache using the same alias pattern as phpMyAdmin. The package config installs this alias:
+
+- **Alias**: `/phppgadmin`
+- **Document root**: `/usr/share/phppgadmin`
+- **Apache config**: `/etc/apache2/conf-available/phppgadmin.conf`
+
+If you need to allow remote access, update the Apache config to remove the `Require local` restriction and reload Apache:
+
+```bash
+sudo sed -i 's/^Require local/Require all granted/' /etc/apache2/conf-available/phppgadmin.conf
+sudo systemctl reload apache2
+```
