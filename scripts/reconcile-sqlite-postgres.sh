@@ -123,12 +123,13 @@ ensure_sequence() {
 }
 
 reset_all_sequences() {
-  runuser -u n8n -- psql -d "$PG_DB" -v ON_ERROR_STOP=1 <<'SQL'
+  runuser -u n8n -- psql -d "$PG_DB" -v ON_ERROR_STOP=1 -v schema_name="$PG_SCHEMA" <<'SQL'
 DO $$
 DECLARE
   r RECORD;
   max_id bigint;
   seq_ident text;
+  target_schema text := :'schema_name';
 BEGIN
   FOR r IN
     SELECT n.nspname AS schema_name,
@@ -142,7 +143,7 @@ BEGIN
     JOIN pg_depend d ON d.refobjid = c.oid AND d.refobjsubid = a.attnum
     JOIN pg_class s ON s.oid = d.objid AND s.relkind = 'S'
     JOIN pg_namespace ns ON ns.oid = s.relnamespace
-    WHERE n.nspname = 'n8n'
+    WHERE n.nspname = target_schema
       AND d.deptype IN ('a','i')
   LOOP
     EXECUTE format('SELECT COALESCE(MAX(%I),0) FROM %I.%I', r.column_name, r.schema_name, r.table_name) INTO max_id;
