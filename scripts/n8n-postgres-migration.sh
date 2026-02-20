@@ -244,24 +244,30 @@ ensure_postgres() {
     local hba_tmp
     local hba_base
     local hba_filter_pattern
+    local hba_filter_parts
     local hba_peer_rule_pattern
+    local grep_status
     db_user_regex="$(printf '%s' "$DB_USER" | sed 's/[][\\.^$*+?()|{}]/\\\\&/g')"
     hba_mode="$(stat -c %a "$hba_file")"
     hba_owner="$(stat -c %u "$hba_file")"
     hba_group="$(stat -c %g "$hba_file")"
     hba_tmp="$(mktemp)"
     hba_base="$(mktemp)"
-    hba_peer_rule_pattern='^local[[:space:]]+all[[:space:]]+all[[:space:]]+peer'
+    hba_peer_rule_pattern="^local[[:space:]]+all[[:space:]]+(all|${db_user_regex})[[:space:]]+peer"
     # Use \\( and \\) to match the literal parentheses in the marker comment.
-    hba_filter_pattern='n8n passwordless access|local socket peer authentication \(migration script\)'
-    hba_filter_pattern+="|^local[[:space:]]+all[[:space:]]+${db_user_regex}[[:space:]]+(peer|trust)"
-    hba_filter_pattern+="|^host[[:space:]]+all[[:space:]]+${db_user_regex}[[:space:]]+127\\.0\\.0\\.1/32[[:space:]]+trust"
-    hba_filter_pattern+="|^host[[:space:]]+all[[:space:]]+${db_user_regex}[[:space:]]+::1/128[[:space:]]+trust"
-    if ! grep -v -E "$hba_filter_pattern" "$hba_file" > "$hba_base"; then
-      if [[ ! -f "$hba_base" ]]; then
-        rm -f "$hba_tmp" "$hba_base"
-        fail "Failed to filter pg_hba.conf rules."
-      fi
+    hba_filter_parts=(
+      "n8n passwordless access"
+      "local socket peer authentication \\(migration script\\)"
+      "^local[[:space:]]+all[[:space:]]+${db_user_regex}[[:space:]]+(peer|trust)"
+      "^host[[:space:]]+all[[:space:]]+${db_user_regex}[[:space:]]+127\\.0\\.0\\.1/32[[:space:]]+trust"
+      "^host[[:space:]]+all[[:space:]]+${db_user_regex}[[:space:]]+::1/128[[:space:]]+trust"
+    )
+    hba_filter_pattern="$(IFS='|'; echo "${hba_filter_parts[*]}")"
+    grep -v -E "$hba_filter_pattern" "$hba_file" > "$hba_base"
+    grep_status=$?
+    if [[ $grep_status -gt 1 ]]; then
+      rm -f "$hba_tmp" "$hba_base"
+      fail "Failed to filter pg_hba.conf rules."
     fi
     if ! grep -q -E "$hba_peer_rule_pattern" "$hba_base"; then
       # Add general peer auth for local socket connections if no such rule exists.
