@@ -255,6 +255,7 @@ ensure_postgres() {
     hba_group="$(stat -c %g "$hba_file")"
     hba_tmp="$(mktemp)"
     hba_base="$(mktemp)"
+    # Detect a general peer rule or a DB_USER-specific peer rule to avoid unnecessary changes.
     hba_peer_rule_pattern="^local[[:space:]]+all[[:space:]]+(all|${db_user_regex})[[:space:]]+peer"
     # Use \\( and \\) to match the literal parentheses in the marker comment.
     hba_comment_patterns=(
@@ -277,6 +278,7 @@ ensure_postgres() {
     if ! grep -q -E "$hba_peer_rule_pattern" "$hba_base"; then
       # Add general peer auth for local socket connections if no such rule exists.
       # This enables local peer auth for all users; tighten it (e.g., local all ${DB_USER} peer) if needed.
+      log "Added general local peer auth rule; tighten it to local all ${DB_USER} peer if required."
       cat > "$hba_tmp" <<EOF
 # local socket peer authentication (migration script)
 local all all peer
