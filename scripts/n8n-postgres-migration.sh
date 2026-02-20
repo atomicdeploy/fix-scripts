@@ -17,12 +17,23 @@ log() {
   echo "[$(date '+%Y-%m-%dT%H:%M:%S%z')] $message" | tee -a "$LOG_FILE"
 }
 
+IMPORT_SUPERUSER_GRANTED="false"
+IMPORT_SUPERUSER_USER_IDENT=""
+
+cleanup_import_privileges() {
+  if [[ "$IMPORT_SUPERUSER_GRANTED" == "true" && -n "$IMPORT_SUPERUSER_USER_IDENT" ]]; then
+    runuser -u postgres -- psql -v ON_ERROR_STOP=1 -c "ALTER USER ${IMPORT_SUPERUSER_USER_IDENT} WITH NOSUPERUSER;" || true
+    IMPORT_SUPERUSER_GRANTED="false"
+    IMPORT_SUPERUSER_USER_IDENT=""
+  fi
+}
+
 fail() {
   log "ERROR: $*"
   exit 1
 }
 
-trap 'fail "Script failed on line $LINENO."' ERR
+trap 'cleanup_import_privileges; fail "Script failed on line $LINENO."' ERR
 
 if [[ "$(id -u)" -ne 0 ]]; then
   fail "This script must be run as root."
@@ -154,20 +165,16 @@ run_n8n_cli() {
   if [[ "$SERVICE_USER" == "root" ]]; then
     (load_env; "$N8N_BIN" "${args[@]}")
   else
-    local command_str
-    command_str="$(printf '%q ' "$N8N_BIN" "${args[@]}")"
-    runuser -u "$SERVICE_USER" -- bash -c "set -a; [ -f \"$ENV_FILE\" ] && . \"$ENV_FILE\"; set +a; $command_str"
+    runuser -u "$SERVICE_USER" -- bash -c 'set -a; [ -f "$1" ] && . "$1"; set +a; shift; "$@"' bash "$ENV_FILE" "$N8N_BIN" "${args[@]}"
   fi
 }
 
 run_n8n_cli_sqlite_export() {
   local args=("$@")
-  local command_str
-  command_str="$(printf '%q ' "$N8N_BIN" "${args[@]}")"
   if [[ "$SERVICE_USER" == "root" ]]; then
-    (load_env; DB_TYPE=sqlite DB_SQLITE_DATABASE="$SQLITE_DB_PATH" $command_str)
+    (load_env; env DB_TYPE=sqlite DB_SQLITE_DATABASE="$SQLITE_DB_PATH" "$N8N_BIN" "${args[@]}")
   else
-    runuser -u "$SERVICE_USER" -- bash -c "set -a; [ -f \"$ENV_FILE\" ] && . \"$ENV_FILE\"; set +a; DB_TYPE=sqlite DB_SQLITE_DATABASE=\"$SQLITE_DB_PATH\" $command_str"
+    runuser -u "$SERVICE_USER" -- bash -c 'set -a; [ -f "$1" ] && . "$1"; set +a; shift; "$@"' bash "$ENV_FILE" env DB_TYPE=sqlite DB_SQLITE_DATABASE="$SQLITE_DB_PATH" "$N8N_BIN" "${args[@]}"
   fi
 }
 
@@ -230,21 +237,21 @@ ensure_postgres() {
     if [[ -z "$hba_file" ]]; then
       fail "Unable to locate pg_hba.conf for passwordless configuration."
     fi
+    local db_user_regex
     local hba_mode
     local hba_owner
     local hba_group
     local hba_tmp
+    db_user_regex="$(printf '%s' "$DB_USER" | sed 's/[][\\.^$*+?()|{}]/\\\\&/g')"
     hba_mode="$(stat -c %a "$hba_file")"
     hba_owner="$(stat -c %u "$hba_file")"
     hba_group="$(stat -c %g "$hba_file")"
     hba_tmp="$(mktemp)"
     cat > "$hba_tmp" <<EOF
 # n8n passwordless access
-local all ${DB_USER} trust
-host all ${DB_USER} 127.0.0.1/32 trust
-host all ${DB_USER} ::1/128 trust
+local all ${DB_USER} peer
 EOF
-    grep -v -E "n8n passwordless access|^local[[:space:]]+all[[:space:]]+${DB_USER}[[:space:]]+trust|^host[[:space:]]+all[[:space:]]+${DB_USER}[[:space:]]+127\\.0\\.0\\.1/32[[:space:]]+trust|^host[[:space:]]+all[[:space:]]+${DB_USER}[[:space:]]+::1/128[[:space:]]+trust" "$hba_file" >> "$hba_tmp"
+    grep -v -E "n8n passwordless access|^local[[:space:]]+all[[:space:]]+${db_user_regex}[[:space:]]+peer" "$hba_file" >> "$hba_tmp"
     cat "$hba_tmp" > "$hba_file"
     chown "$hba_owner:$hba_group" "$hba_file"
     chmod "$hba_mode" "$hba_file"
@@ -281,7 +288,7 @@ ensure_sqlite_secrets_table() {
     log "sqlite3 not found; skipping SQLite table checks."
     return
   fi
-  if ! sqlite3 "$db_path" "SELECT name FROM sqlite_master WHERE type='table' AND name='secrets_provider_connection';" | grep -q secrets_provider_connection; then
+  if [[ -z "$(sqlite3 "$db_path" "SELECT name FROM sqlite_master WHERE type='table' AND name='secrets_provider_connection';")" ]]; then
     log "Creating missing secrets_provider_connection table in SQLite."
     sqlite3 "$db_path" <<'SQL'
 CREATE TABLE IF NOT EXISTS secrets_provider_connection (
@@ -295,7 +302,7 @@ CREATE TABLE IF NOT EXISTS secrets_provider_connection (
 SQL
   fi
 
-  if ! sqlite3 "$db_path" "SELECT name FROM sqlite_master WHERE type='table' AND name='project_secrets_provider_access';" | grep -q project_secrets_provider_access; then
+  if [[ -z "$(sqlite3 "$db_path" "SELECT name FROM sqlite_master WHERE type='table' AND name='project_secrets_provider_access';")" ]]; then
     log "Creating missing project_secrets_provider_access table in SQLite."
     sqlite3 "$db_path" <<'SQL'
 CREATE TABLE IF NOT EXISTS project_secrets_provider_access (
@@ -362,6 +369,9 @@ DB_PASSWORDLESS="${DB_PASSWORDLESS:-$DEFAULT_DB_PASSWORDLESS}"
 if [[ "$DB_PASSWORDLESS" == "true" ]]; then
   DB_PASSWORD=""
   log "PostgreSQL passwordless mode enabled; no password will be set."
+  if [[ -z "$DB_HOST" || "$DB_HOST" == "localhost" || "$DB_HOST" == "127.0.0.1" ]]; then
+    DB_HOST="/var/run/postgresql"
+  fi
 else
   if [[ -n "${DB_POSTGRESDB_PASSWORD:-}" ]]; then
     DB_PASSWORD="$DB_POSTGRESDB_PASSWORD"
@@ -389,7 +399,7 @@ set_env_value DB_POSTGRESDB_SCHEMA "$DB_SCHEMA"
 
 log "Ensuring ownership for n8n directories."
 chown -R "$SERVICE_USER":"$SERVICE_GROUP" "$N8N_DIR"
-if [[ -d "$N8N_USER_FOLDER" && "$N8N_USER_FOLDER" != "$N8N_DIR" && "$N8N_USER_FOLDER" != "$N8N_DIR/"* ]]; then
+if [[ -d "$N8N_USER_FOLDER" && "$N8N_USER_FOLDER" != "$N8N_DIR" && "$N8N_USER_FOLDER" != "$N8N_DIR"/* ]]; then
   chown -R "$SERVICE_USER":"$SERVICE_GROUP" "$N8N_USER_FOLDER"
 fi
 
@@ -422,19 +432,15 @@ log "Validating n8n CLI availability."
 run_n8n_cli --version >/dev/null
 
 log "Importing entities from $EXPORT_DIR."
-IMPORT_SUPERUSER_GRANTED=false
 db_user_ident="$(pg_quote_identifier "$DB_USER")"
+IMPORT_SUPERUSER_USER_IDENT="$db_user_ident"
 runuser -u postgres -- psql -v ON_ERROR_STOP=1 -c "ALTER USER ${db_user_ident} WITH SUPERUSER;"
-IMPORT_SUPERUSER_GRANTED=true
+IMPORT_SUPERUSER_GRANTED="true"
 if ! run_n8n_cli import:entities --inputDir "$EXPORT_DIR" --truncateTables true 2>&1 | tee -a "$LOG_FILE"; then
-  if [[ "$IMPORT_SUPERUSER_GRANTED" == "true" ]]; then
-    runuser -u postgres -- psql -v ON_ERROR_STOP=1 -c "ALTER USER ${db_user_ident} WITH NOSUPERUSER;"
-  fi
+  cleanup_import_privileges
   fail "n8n import:entities failed."
 fi
-if [[ "$IMPORT_SUPERUSER_GRANTED" == "true" ]]; then
-  runuser -u postgres -- psql -v ON_ERROR_STOP=1 -c "ALTER USER ${db_user_ident} WITH NOSUPERUSER;"
-fi
+cleanup_import_privileges
 
 log "Checking systemd status and recent logs for errors."
 systemctl --no-pager status "$SERVICE_NAME"
