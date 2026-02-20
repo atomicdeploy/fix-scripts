@@ -283,7 +283,7 @@ ensure_postgres() {
       if [[ "$DB_PASSWORDLESS_ALLOW_ALL_PEER" == "true" ]]; then
         log "WARNING: Added general local peer auth rule (local all all peer)."
         log "WARNING: Any local system user with a matching PostgreSQL role can access any database."
-        log "WARNING: Tighten to: local \"${DB_NAME}\" \"${DB_USER}\" peer."
+        log "WARNING: Set DB_PASSWORDLESS_ALLOW_ALL_PEER=false to use local \"${DB_NAME}\" \"${DB_USER}\" peer."
         cat > "$hba_tmp" <<EOF
 # local socket peer authentication (migration script)
 local all all peer
