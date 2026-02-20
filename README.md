@@ -77,6 +77,12 @@ By default it uses the latest `/tmp/database.sqlite.backup-*` file. You can over
 SQLITE_DB=/tmp/database.sqlite.backup-YYYYMMDD-HHMMSS PG_DB=n8n PG_SCHEMA=n8n sudo /tmp/reconcile-sqlite-postgres.sh
 ```
 
+If you need to force data reload when counts differ, set:
+
+```bash
+FORCE_SYNC_TABLES=true SQLITE_DB=/tmp/database.sqlite.backup-YYYYMMDD-HHMMSS PG_DB=n8n PG_SCHEMA=n8n sudo /tmp/reconcile-sqlite-postgres.sh
+```
+
 Copy the script from this repo:
 
 ```bash

@@ -67,10 +67,49 @@ column_list() {
   sqlite3 "$SQLITE_DB" "PRAGMA table_info(\"$table\");" | awk -F'|' '{print $2}' | paste -sd ',' -
 }
 
+needs_sequence() {
+  local table="$1"
+  TABLE="$table" SQLITE_DB="$SQLITE_DB" python - <<'PY'
+import os
+import sqlite3
+
+db_path = os.environ['SQLITE_DB']
+table = os.environ['TABLE']
+conn = sqlite3.connect(db_path)
+rows = conn.execute(f'PRAGMA table_info(\"{table}\")').fetchall()
+for _, name, col_type, _, _, pk in rows:
+    if name == 'id' and pk == 1 and 'INT' in (col_type or '').upper():
+        print('true')
+        break
+else:
+    print('false')
+PY
+}
+
+ensure_sequence() {
+  local table="$1"
+  local has_seq
+  has_seq=$(needs_sequence "$table")
+  if [[ "$has_seq" != "true" ]]; then
+    return
+  fi
+  local seq_name
+  seq_name="${PG_SCHEMA}.\"${table}_id_seq\""
+  runuser -u n8n -- psql -d "$PG_DB" -v ON_ERROR_STOP=1 -c "CREATE SEQUENCE IF NOT EXISTS ${PG_SCHEMA}.\"${table}_id_seq\";"
+  runuser -u n8n -- psql -d "$PG_DB" -v ON_ERROR_STOP=1 -c "ALTER TABLE ${PG_SCHEMA}.\"$table\" ALTER COLUMN id SET DEFAULT nextval('${seq_name}');"
+  max_id=$(runuser -u n8n -- psql -d "$PG_DB" -Atc "SELECT COALESCE(MAX(id),0) FROM ${PG_SCHEMA}.\"$table\";")
+  if [[ "$max_id" == "0" ]]; then
+    runuser -u n8n -- psql -d "$PG_DB" -v ON_ERROR_STOP=1 -c "SELECT setval('${seq_name}', 1, false);"
+  else
+    runuser -u n8n -- psql -d "$PG_DB" -v ON_ERROR_STOP=1 -c "SELECT setval('${seq_name}', ${max_id}, true);"
+  fi
+}
+
 for table in "${missing_tables[@]}"; do
   echo "Creating table $table"
   schema_sql=$(convert_schema "$table")
   runuser -u n8n -- psql -d "$PG_DB" -v ON_ERROR_STOP=1 -c "$schema_sql"
+  ensure_sequence "$table"
   echo "Copying data for $table"
   columns=$(column_list "$table")
   sqlite3 -csv -cmd ".nullvalue \\N" "$SQLITE_DB" "SELECT $columns FROM \"$table\";" | \
@@ -95,6 +134,7 @@ for table in $sqlite_tables; do
   elif [[ "$pg_count" != "$sqlite_count" ]]; then
     echo "Counts differ for $table (sqlite=$sqlite_count, pg=$pg_count). Set FORCE_SYNC_TABLES=true to reconcile."
   fi
+  ensure_sequence "$table"
 done
 
 pg_tables=$(runuser -u n8n -- psql -d "$PG_DB" -Atc "SELECT tablename FROM pg_tables WHERE schemaname='${PG_SCHEMA}' ORDER BY tablename;")
