@@ -5,6 +5,7 @@ IFS=$'\n\t'
 SQLITE_DB="${SQLITE_DB:-}"
 PG_DB="${PG_DB:-n8n}"
 PG_SCHEMA="${PG_SCHEMA:-n8n}"
+FORCE_SYNC_TABLES="${FORCE_SYNC_TABLES:-false}"
 
 if [[ -z "$SQLITE_DB" ]]; then
   SQLITE_DB="$(ls -t /tmp/database.sqlite.backup-* 2>/dev/null | head -n 1 || true)"
@@ -17,8 +18,14 @@ fi
 
 echo "Using SQLite backup: $SQLITE_DB"
 
-sqlite_tables=$(sqlite3 "$SQLITE_DB" "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name;")
-pg_tables=$(runuser -u n8n -- psql -d "$PG_DB" -Atc "SELECT tablename FROM pg_tables WHERE schemaname='${PG_SCHEMA}' ORDER BY tablename;")
+sqlite_tables=$(sqlite3 "$SQLITE_DB" "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name;") || {
+  echo "Failed to read SQLite tables from $SQLITE_DB" >&2
+  exit 1
+}
+pg_tables=$(runuser -u n8n -- psql -d "$PG_DB" -Atc "SELECT tablename FROM pg_tables WHERE schemaname='${PG_SCHEMA}' ORDER BY tablename;") || {
+  echo "Failed to read Postgres tables from $PG_DB" >&2
+  exit 1
+}
 
 missing_tables=()
 for table in $sqlite_tables; do
@@ -55,13 +62,19 @@ print(sql + ';')
 PY
 }
 
+column_list() {
+  local table="$1"
+  sqlite3 "$SQLITE_DB" "PRAGMA table_info(\"$table\");" | awk -F'|' '{print $2}' | paste -sd ',' -
+}
+
 for table in "${missing_tables[@]}"; do
   echo "Creating table $table"
   schema_sql=$(convert_schema "$table")
   runuser -u n8n -- psql -d "$PG_DB" -v ON_ERROR_STOP=1 -c "$schema_sql"
   echo "Copying data for $table"
-  sqlite3 -csv -cmd ".nullvalue \\N" "$SQLITE_DB" "SELECT * FROM \"$table\";" | \
-    runuser -u n8n -- psql -d "$PG_DB" -v ON_ERROR_STOP=1 -c "COPY ${PG_SCHEMA}.\"$table\" FROM STDIN WITH (FORMAT csv, NULL '\\N');"
+  columns=$(column_list "$table")
+  sqlite3 -csv -cmd ".nullvalue \\N" "$SQLITE_DB" "SELECT $columns FROM \"$table\";" | \
+    runuser -u n8n -- psql -d "$PG_DB" -v ON_ERROR_STOP=1 -c "COPY ${PG_SCHEMA}.\"$table\" ($columns) FROM STDIN WITH (FORMAT csv, NULL '\\N');"
 done
 
 for table in $sqlite_tables; do
@@ -70,8 +83,17 @@ for table in $sqlite_tables; do
   if [[ "$pg_count" == "0" && "$sqlite_count" != "0" ]]; then
     echo "Syncing data for $table (sqlite=$sqlite_count, pg=$pg_count)"
     runuser -u n8n -- psql -d "$PG_DB" -v ON_ERROR_STOP=1 -c "TRUNCATE ${PG_SCHEMA}.\"$table\";"
-    sqlite3 -csv -cmd ".nullvalue \\N" "$SQLITE_DB" "SELECT * FROM \"$table\";" | \
-      runuser -u n8n -- psql -d "$PG_DB" -v ON_ERROR_STOP=1 -c "COPY ${PG_SCHEMA}.\"$table\" FROM STDIN WITH (FORMAT csv, NULL '\\N');"
+    columns=$(column_list "$table")
+    sqlite3 -csv -cmd ".nullvalue \\N" "$SQLITE_DB" "SELECT $columns FROM \"$table\";" | \
+      runuser -u n8n -- psql -d "$PG_DB" -v ON_ERROR_STOP=1 -c "COPY ${PG_SCHEMA}.\"$table\" ($columns) FROM STDIN WITH (FORMAT csv, NULL '\\N');"
+  elif [[ "$pg_count" != "$sqlite_count" && "$FORCE_SYNC_TABLES" == "true" ]]; then
+    echo "Force syncing data for $table (sqlite=$sqlite_count, pg=$pg_count)"
+    runuser -u n8n -- psql -d "$PG_DB" -v ON_ERROR_STOP=1 -c "TRUNCATE ${PG_SCHEMA}.\"$table\";"
+    columns=$(column_list "$table")
+    sqlite3 -csv -cmd ".nullvalue \\N" "$SQLITE_DB" "SELECT $columns FROM \"$table\";" | \
+      runuser -u n8n -- psql -d "$PG_DB" -v ON_ERROR_STOP=1 -c "COPY ${PG_SCHEMA}.\"$table\" ($columns) FROM STDIN WITH (FORMAT csv, NULL '\\N');"
+  elif [[ "$pg_count" != "$sqlite_count" ]]; then
+    echo "Counts differ for $table (sqlite=$sqlite_count, pg=$pg_count). Set FORCE_SYNC_TABLES=true to reconcile."
   fi
 done
 

@@ -65,7 +65,7 @@ sudo systemctl reload apache2
 
 ## Reconcile SQLite tables to PostgreSQL
 
-If you suspect SQLite tables were not migrated into PostgreSQL (e.g., data tables missing), run:
+If you suspect SQLite tables were not migrated into PostgreSQL (e.g., data tables missing), copy and run:
 
 ```bash
 sudo /tmp/reconcile-sqlite-postgres.sh
@@ -75,4 +75,11 @@ By default it uses the latest `/tmp/database.sqlite.backup-*` file. You can over
 
 ```bash
 SQLITE_DB=/tmp/database.sqlite.backup-YYYYMMDD-HHMMSS PG_DB=n8n PG_SCHEMA=n8n sudo /tmp/reconcile-sqlite-postgres.sh
+```
+
+Copy the script from this repo:
+
+```bash
+scp -i /path/to/key -P 8022 ./scripts/reconcile-sqlite-postgres.sh root@your-host:/tmp/reconcile-sqlite-postgres.sh
+chmod +x /tmp/reconcile-sqlite-postgres.sh
 ```
