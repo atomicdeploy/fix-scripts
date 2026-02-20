@@ -54,3 +54,11 @@ sudo sed -i 's/^Require local/Require ip 203.0.113.0\/24/' /etc/apache2/conf-ava
 sudo apache2ctl configtest
 sudo systemctl reload apache2
 ```
+
+To allow login with administrative accounts (e.g., `postgres`), disable phpPgAdmin's extra login security and set a password:
+
+```bash
+sudo sed -i "s/\\$conf\\['extra_login_security'\\] = true;/\\$conf['extra_login_security'] = false;/" /etc/phppgadmin/config.inc.php
+sudo -u postgres psql -c "ALTER USER postgres WITH PASSWORD '<set-a-strong-password>';"
+sudo systemctl reload apache2
+```
