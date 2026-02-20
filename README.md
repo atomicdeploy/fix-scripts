@@ -83,6 +83,12 @@ If you need to force data reload when counts differ, set:
 FORCE_SYNC_TABLES=true SQLITE_DB=/tmp/database.sqlite.backup-YYYYMMDD-HHMMSS PG_DB=n8n PG_SCHEMA=n8n sudo /tmp/reconcile-sqlite-postgres.sh
 ```
 
+The script also resets sequences to the current max IDs (for tables with identity/serial columns). You can disable that if needed:
+
+```bash
+RESET_SEQUENCES=false SQLITE_DB=/tmp/database.sqlite.backup-YYYYMMDD-HHMMSS PG_DB=n8n PG_SCHEMA=n8n sudo /tmp/reconcile-sqlite-postgres.sh
+```
+
 Copy the script from this repo:
 
 ```bash

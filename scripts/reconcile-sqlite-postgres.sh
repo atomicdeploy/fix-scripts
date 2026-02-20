@@ -6,6 +6,7 @@ SQLITE_DB="${SQLITE_DB:-}"
 PG_DB="${PG_DB:-n8n}"
 PG_SCHEMA="${PG_SCHEMA:-n8n}"
 FORCE_SYNC_TABLES="${FORCE_SYNC_TABLES:-false}"
+RESET_SEQUENCES="${RESET_SEQUENCES:-true}"
 
 if [[ -z "$SQLITE_DB" ]]; then
   SQLITE_DB="$(ls -t /tmp/database.sqlite.backup-* 2>/dev/null | head -n 1 || true)"
@@ -121,6 +122,41 @@ ensure_sequence() {
   fi
 }
 
+reset_all_sequences() {
+  runuser -u n8n -- psql -d "$PG_DB" -v ON_ERROR_STOP=1 <<'SQL'
+DO $$
+DECLARE
+  r RECORD;
+  max_id bigint;
+  seq_ident text;
+BEGIN
+  FOR r IN
+    SELECT n.nspname AS schema_name,
+           c.relname AS table_name,
+           a.attname AS column_name,
+           ns.nspname AS seq_schema,
+           s.relname AS seq_name
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
+    JOIN pg_depend d ON d.refobjid = c.oid AND d.refobjsubid = a.attnum
+    JOIN pg_class s ON s.oid = d.objid AND s.relkind = 'S'
+    JOIN pg_namespace ns ON ns.oid = s.relnamespace
+    WHERE n.nspname = 'n8n'
+      AND d.deptype IN ('a','i')
+  LOOP
+    EXECUTE format('SELECT COALESCE(MAX(%I),0) FROM %I.%I', r.column_name, r.schema_name, r.table_name) INTO max_id;
+    seq_ident := format('%I.%I', r.seq_schema, r.seq_name);
+    IF max_id = 0 THEN
+      EXECUTE format('SELECT setval(%L::regclass, 1, false)', seq_ident);
+    ELSE
+      EXECUTE format('SELECT setval(%L::regclass, %s, true)', seq_ident, max_id);
+    END IF;
+  END LOOP;
+END$$;
+SQL
+}
+
 for table in "${missing_tables[@]}"; do
   validate_table_name "$table"
   echo "Creating table $table"
@@ -154,6 +190,11 @@ for table in $sqlite_tables; do
   fi
   ensure_sequence "$table"
 done
+
+if [[ "$RESET_SEQUENCES" == "true" ]]; then
+  echo "Resetting sequences to max IDs."
+  reset_all_sequences
+fi
 
 pg_tables=$(runuser -u n8n -- psql -d "$PG_DB" -Atc "SELECT tablename FROM pg_tables WHERE schemaname='${PG_SCHEMA}' ORDER BY tablename;")
 missing_tables=()
