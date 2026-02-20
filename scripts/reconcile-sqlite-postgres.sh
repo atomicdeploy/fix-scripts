@@ -88,8 +88,8 @@ table = os.environ['TABLE']
 if not re.match(r'^[A-Za-z0-9_]+$', table):
     raise SystemExit(1)
 conn = sqlite3.connect(db_path)
-rows = conn.execute(f'PRAGMA table_info(\"{table}\")').fetchall()
-for _, name, col_type, _, _, pk in rows:
+rows = conn.execute('SELECT name, type, pk FROM pragma_table_info(?)', (table,)).fetchall()
+for name, col_type, pk in rows:
     if name == 'id' and pk == 1 and 'INT' in (col_type or '').upper():
         print('true')
         break
@@ -110,6 +110,10 @@ ensure_sequence() {
   runuser -u n8n -- psql -d "$PG_DB" -v ON_ERROR_STOP=1 -c "CREATE SEQUENCE IF NOT EXISTS ${seq_name};"
   runuser -u n8n -- psql -d "$PG_DB" -v ON_ERROR_STOP=1 -c "ALTER TABLE ${PG_SCHEMA}.\"$table\" ALTER COLUMN id SET DEFAULT nextval('${seq_name}');"
   max_id=$(runuser -u n8n -- psql -d "$PG_DB" -Atc "SELECT COALESCE(MAX(id),0) FROM ${PG_SCHEMA}.\"$table\";")
+  if [[ ! "$max_id" =~ ^[0-9]+$ ]]; then
+    echo "Invalid max_id for $table: $max_id" >&2
+    exit 1
+  fi
   if [[ "$max_id" -eq 0 ]]; then
     runuser -u n8n -- psql -d "$PG_DB" -v ON_ERROR_STOP=1 -c "SELECT setval('${seq_name}', 1, false);"
   else
