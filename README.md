@@ -62,3 +62,17 @@ sudo sed -i "s/\\$conf\\['extra_login_security'\\] = true;/\\$conf['extra_login_
 sudo -u postgres psql -c "ALTER USER postgres WITH PASSWORD '<YOUR_STRONG_PASSWORD>';"
 sudo systemctl reload apache2
 ```
+
+## Reconcile SQLite tables to PostgreSQL
+
+If you suspect SQLite tables were not migrated into PostgreSQL (e.g., data tables missing), run:
+
+```bash
+sudo /tmp/reconcile-sqlite-postgres.sh
+```
+
+By default it uses the latest `/tmp/database.sqlite.backup-*` file. You can override:
+
+```bash
+SQLITE_DB=/tmp/database.sqlite.backup-YYYYMMDD-HHMMSS PG_DB=n8n PG_SCHEMA=n8n sudo /tmp/reconcile-sqlite-postgres.sh
+```
