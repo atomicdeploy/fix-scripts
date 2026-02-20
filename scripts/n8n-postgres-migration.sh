@@ -256,8 +256,8 @@ ensure_postgres() {
     hba_peer_rule_pattern="^local[[:space:]]+all[[:space:]]+(all|${db_user_regex})[[:space:]]+peer"
     # Use \\( and \\) to match the literal parentheses in the marker comment.
     hba_filter_parts=(
-      "n8n passwordless access"
-      "local socket peer authentication \\(migration script\\)"
+      "^[[:space:]]*#.*n8n passwordless access"
+      "^[[:space:]]*#.*local socket peer authentication \\(migration script\\)"
       "^local[[:space:]]+all[[:space:]]+${db_user_regex}[[:space:]]+(peer|trust)"
       "^host[[:space:]]+all[[:space:]]+${db_user_regex}[[:space:]]+127\\.0\\.0\\.1/32[[:space:]]+trust"
       "^host[[:space:]]+all[[:space:]]+${db_user_regex}[[:space:]]+::1/128[[:space:]]+trust"
@@ -267,10 +267,11 @@ ensure_postgres() {
     grep_status=$?
     if [[ $grep_status -gt 1 ]]; then
       rm -f "$hba_tmp" "$hba_base"
-      fail "Failed to filter pg_hba.conf rules."
+      fail "Failed to filter pg_hba.conf rules (grep exit: $grep_status)."
     fi
     if ! grep -q -E "$hba_peer_rule_pattern" "$hba_base"; then
       # Add general peer auth for local socket connections if no such rule exists.
+      # This enables local peer auth for all users; tighten it if your policy requires.
       cat > "$hba_tmp" <<EOF
 # local socket peer authentication (migration script)
 local all all peer
