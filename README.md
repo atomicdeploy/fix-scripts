@@ -188,7 +188,7 @@ Key steps:
    chmod 600 "$combined"
    ln -sf "$combined" /etc/webmin/miniserv.pem
    # Optional: replace with your webhook URL, or remove this line.
-   curl -fsS -X POST https://example.com/webhook/cert-renew || true
+   curl -fsS -X POST YOUR_WEBHOOK_URL || true
    SCRIPT
    chmod 750 /usr/local/bin/lego-post-hook.sh
    ```
