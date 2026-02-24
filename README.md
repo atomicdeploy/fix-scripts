@@ -113,9 +113,12 @@ Key steps:
    ```
 3. **n8n user + service**:
    ```bash
+   # Use the same UID/GID as server1 to keep ownership consistent for shared backups.
    groupadd -g 982 n8n
    useradd -m -u 994 -g 982 -G www-data -s /bin/bash n8n
-   # create /var/lib/n8n, /var/lib/n8n/.n8n/.env, and /etc/systemd/system/n8n.service
+   # create /var/lib/n8n, /var/lib/n8n/.n8n/.env, /var/lib/n8n/n8n-start.sh, and /etc/systemd/system/n8n.service
+   install -d -m 750 -o n8n -g n8n /var/lib/n8n
+   install -d -m 755 -o n8n -g n8n /var/lib/n8n/.n8n
    ```
 4. **Apache vhost**: mirror `automation.yektayar.ir.conf` but update to `automation.digitalogic.ir` and `digitalogic.ir` certs.
 
