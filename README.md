@@ -192,6 +192,20 @@ Key steps:
    ```
    Wire the hook into the renew cron with a wrapper script:
    ```bash
+   cat > /usr/local/bin/lego-sync-digitalogic.sh <<'SCRIPT'
+   #!/usr/bin/env bash
+   set -euo pipefail
+   cert_dir=/etc/letsencrypt/lego/certificates
+   live_dir=/etc/letsencrypt/live/digitalogic.ir
+   install -d -m 700 -o root -g root "$live_dir"
+   install -m 644 -o root -g root "$cert_dir/_.digitalogic.ir.crt" "$live_dir/cert.pem"
+   install -m 644 -o root -g root "$cert_dir/_.digitalogic.ir.issuer.crt" "$live_dir/chain.pem"
+   cat "$cert_dir/_.digitalogic.ir.crt" "$cert_dir/_.digitalogic.ir.issuer.crt" > "$live_dir/fullchain.pem"
+   chmod 644 "$live_dir/fullchain.pem"
+   install -m 600 -o root -g root "$cert_dir/_.digitalogic.ir.key" "$live_dir/privkey.pem"
+   SCRIPT
+   chmod 750 /usr/local/bin/lego-sync-digitalogic.sh
+
    cat > /usr/local/bin/lego-renew-digitalogic.sh <<'SCRIPT'
    #!/usr/bin/env bash
    set -euo pipefail
@@ -203,7 +217,13 @@ Key steps:
    SCRIPT
    chmod 750 /usr/local/bin/lego-renew-digitalogic.sh
 
+   cat > /etc/cron.d/lego-renew-digitalogic <<'CRON'
+   SHELL=/bin/bash
+   PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+
    30 3 * * * root /usr/local/bin/lego-renew-digitalogic.sh
+   CRON
+   chmod 644 /etc/cron.d/lego-renew-digitalogic
    # If lego renew fails, the previous cert remains; rerun lego-sync/lego-post-hook manually after resolving the error.
    ```
 
