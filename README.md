@@ -141,6 +141,22 @@ Key steps:
    mv /etc/letsencrypt/live/digitalogic.ir-0001 /tmp/letsencrypt-backup/ || true
    ```
 
+6. **Wildcard cert with lego (recommended)**: `certbot-dns-arvancloud` is deprecated, so use `lego` with ArvanCloud DNS.
+   ```bash
+   # install lego
+   curl -s https://api.github.com/repos/go-acme/lego/releases/latest | python3 -c "import json,sys; print(json.load(sys.stdin)['tag_name'])"
+   # download the release and install /usr/local/bin/lego (see runbook)
+
+   export ARVANCLOUD_API_KEY=$(awk '{print $2}' /tmp/arvancloud_key.txt)
+   /usr/local/bin/lego --dns arvancloud \
+     --domains digitalogic.ir \
+     --domains '*.digitalogic.ir' \
+     --email admin@digitalogic.ir \
+     --path /etc/letsencrypt/lego \
+     --accept-tos run
+   ```
+   If the API key lacks DNS permissions for the zone, the run will return **401 Unauthenticated** and must be retried with a key that has DNS record access for `digitalogic.ir`.
+
 Copy the script from this repo:
 
 ```bash
