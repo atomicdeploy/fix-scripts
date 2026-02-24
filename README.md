@@ -180,12 +180,14 @@ Key steps:
    cat > /usr/local/bin/lego-post-hook.sh <<'SCRIPT'
    #!/usr/bin/env bash
    set -euo pipefail
-   live_dir=/etc/letsencrypt/live/digitalogic.ir
+   DOMAIN=digitalogic.ir
+   live_dir=/etc/letsencrypt/live/$DOMAIN
    combined=$live_dir/combined.pem
    cat "$live_dir/fullchain.pem" "$live_dir/privkey.pem" > "$combined"
    test -s "$combined"
    chmod 600 "$combined"
    ln -sf "$combined" /etc/webmin/miniserv.pem
+   # Optional: replace with your monitoring webhook, or remove this line.
    curl -fsS -X POST https://automation.digitalogic.ir/webhook/cert-renew || true
    SCRIPT
    chmod 750 /usr/local/bin/lego-post-hook.sh
@@ -195,8 +197,9 @@ Key steps:
    cat > /usr/local/bin/lego-sync-digitalogic.sh <<'SCRIPT'
    #!/usr/bin/env bash
    set -euo pipefail
+   DOMAIN=digitalogic.ir
    cert_dir=/etc/letsencrypt/lego/certificates
-   live_dir=/etc/letsencrypt/live/digitalogic.ir
+   live_dir=/etc/letsencrypt/live/$DOMAIN
    install -d -m 700 -o root -g root "$live_dir"
    install -m 644 -o root -g root "$cert_dir/_.digitalogic.ir.crt" "$live_dir/cert.pem"
    install -m 644 -o root -g root "$cert_dir/_.digitalogic.ir.issuer.crt" "$live_dir/chain.pem"
@@ -209,8 +212,10 @@ Key steps:
    cat > /usr/local/bin/lego-renew-digitalogic.sh <<'SCRIPT'
    #!/usr/bin/env bash
    set -euo pipefail
+   DOMAIN=digitalogic.ir
+   EMAIL=mahdielector@hotmail.com # replace with your email for Let's Encrypt notices
    . /etc/letsencrypt/lego/arvancloud.env
-   /usr/local/bin/lego --dns arvancloud --domains digitalogic.ir --domains '*.digitalogic.ir' --email mahdielector@hotmail.com --accept-tos --path /etc/letsencrypt/lego renew --days 30
+   /usr/local/bin/lego --dns arvancloud --domains "$DOMAIN" --domains "*.${DOMAIN}" --email "$EMAIL" --accept-tos --path /etc/letsencrypt/lego renew --days 30
    /usr/local/bin/lego-sync-digitalogic.sh
    /usr/local/bin/lego-post-hook.sh
    systemctl reload apache2
