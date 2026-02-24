@@ -188,7 +188,7 @@ Key steps:
    chmod 600 "$combined"
    ln -sf "$combined" /etc/webmin/miniserv.pem
    # Optional: replace with your webhook URL, or remove this line.
-   curl -fsS -X POST https://your-monitoring.example.com/webhook/cert-renew || true
+   curl -fsS -X POST https://example.com/webhook/cert-renew || true
    SCRIPT
    chmod 750 /usr/local/bin/lego-post-hook.sh
    ```
@@ -200,7 +200,7 @@ Key steps:
    DOMAIN=example.com # replace with your domain
    cert_dir=/etc/letsencrypt/lego/certificates
    live_dir=/etc/letsencrypt/live/$DOMAIN
-   cert_prefix=_${DOMAIN} # lego wildcard files are prefixed with '_' by default
+   cert_prefix=_${DOMAIN} # lego prefixes wildcard cert files with '_' by default
    install -d -m 700 -o root -g root "$live_dir"
    install -m 644 -o root -g root "$cert_dir/${cert_prefix}.crt" "$live_dir/cert.pem"
    install -m 644 -o root -g root "$cert_dir/${cert_prefix}.issuer.crt" "$live_dir/chain.pem"
