@@ -168,6 +168,13 @@ Key steps:
    ```
    If the API key lacks DNS permissions for the zone, the run will return **401 Unauthenticated** and must be retried with a key that has DNS record access for `digitalogic.ir`.
 
+   Certificates will be stored under `/etc/letsencrypt/lego/certificates/_.digitalogic.ir.*` (no `/root/.lego` usage). Sync them into the Apache live path:
+   ```bash
+   /usr/local/bin/lego-sync-digitalogic.sh
+   systemctl reload apache2
+   ```
+   If `/root/.lego` exists from a prior run, move it into `/etc/letsencrypt/lego` and remove the old path.
+
 Copy the script from this repo:
 
 ```bash
