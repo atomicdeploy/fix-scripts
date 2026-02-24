@@ -183,6 +183,7 @@ Key steps:
    live_dir=/etc/letsencrypt/live/digitalogic.ir
    combined=$live_dir/combined.pem
    cat "$live_dir/fullchain.pem" "$live_dir/privkey.pem" > "$combined"
+   test -s "$combined"
    chmod 600 "$combined"
    ln -sf "$combined" /etc/webmin/miniserv.pem
    curl -fsS -X POST https://automation.digitalogic.ir/webhook/cert-renew || true
@@ -192,6 +193,7 @@ Key steps:
    Wire the hook into the renew cron:
    ```bash
    30 3 * * * root . /etc/letsencrypt/lego/arvancloud.env && /usr/local/bin/lego --dns arvancloud --domains digitalogic.ir --domains '*.digitalogic.ir' --email mahdielector@hotmail.com --accept-tos --path /etc/letsencrypt/lego renew --days 30 && /usr/local/bin/lego-sync-digitalogic.sh && /usr/local/bin/lego-post-hook.sh && systemctl reload apache2
+   # If lego renew fails, the previous cert remains; rerun lego-sync/lego-post-hook manually after resolving the error.
    ```
 
 Copy the script from this repo:
