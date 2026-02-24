@@ -105,6 +105,14 @@ Key steps:
    pg_upgradecluster -v 16 14 main
    pg_ctlcluster 16 main start
    ```
+   After verifying the migrated data, remove old clusters/packages so only 16 remains:
+   ```bash
+   pg_dropcluster --stop 14 main
+   pg_dropcluster --stop 17 main || true
+   pg_dropcluster --stop 18 main || true
+   apt-get purge -y postgresql-14 postgresql-client-14 postgresql-17 postgresql-client-17 postgresql-18 postgresql-client-18
+   apt-get autoremove -y
+   ```
 2. **Node.js + n8n**:
    ```bash
    curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
@@ -121,6 +129,17 @@ Key steps:
    install -d -m 755 -o n8n -g n8n /var/lib/n8n/.n8n
    ```
 4. **Apache vhost**: mirror `automation.yektayar.ir.conf` but update to `automation.digitalogic.ir` and `digitalogic.ir` certs.
+
+5. **Let’s Encrypt cert merge**: if `digitalogic.ir-0001` is a duplicate of `digitalogic.ir`, update Apache references and archive the extra cert:
+   ```bash
+   sed -i 's/digitalogic.ir-0001/digitalogic.ir/g' /etc/apache2/sites-available/000-default-ssl.conf /etc/apache2/sites-available/000-default-le-ssl.conf /etc/apache2/sites-available/panel.digitalogic.ir.conf
+   apache2ctl configtest
+   systemctl reload apache2
+   mkdir -p /tmp/letsencrypt-backup
+   mv /etc/letsencrypt/renewal/digitalogic.ir-0001.conf /tmp/letsencrypt-backup/ || true
+   mv /etc/letsencrypt/archive/digitalogic.ir-0001 /tmp/letsencrypt-backup/ || true
+   mv /etc/letsencrypt/live/digitalogic.ir-0001 /tmp/letsencrypt-backup/ || true
+   ```
 
 Copy the script from this repo:
 
