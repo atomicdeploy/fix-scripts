@@ -89,6 +89,36 @@ The script also resets sequences to the current max IDs (for tables with identit
 RESET_SEQUENCES=false SQLITE_DB=/tmp/database.sqlite.backup-YYYYMMDD-HHMMSS PG_DB=n8n PG_SCHEMA=n8n sudo /tmp/reconcile-sqlite-postgres.sh
 ```
 
+## Second server (Digitalogic) bootstrap
+
+Use the same n8n layout as the primary server, but update hostnames to `automation.digitalogic.ir`.
+
+Key steps:
+
+1. **PostgreSQL**: Upgrade existing data (do not drop) and ensure a 16/main cluster on port 5432.
+   ```bash
+   pg_ctlcluster 14 main start
+   sudo -u postgres pg_dumpall > /tmp/pg_backup_14.sql
+   pg_ctlcluster 14 main stop
+   # drop empty 16/main if it exists (keep data if it is in use)
+   pg_dropcluster --stop 16 main
+   pg_upgradecluster -v 16 14 main
+   pg_ctlcluster 16 main start
+   ```
+2. **Node.js + n8n**:
+   ```bash
+   curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
+   apt-get install -y nodejs
+   npm install -g n8n
+   ```
+3. **n8n user + service**:
+   ```bash
+   groupadd -g 982 n8n
+   useradd -m -u 994 -g 982 -G www-data -s /bin/bash n8n
+   # create /var/lib/n8n, /var/lib/n8n/.n8n/.env, and /etc/systemd/system/n8n.service
+   ```
+4. **Apache vhost**: mirror `automation.yektayar.ir.conf` but update to `automation.digitalogic.ir` and `digitalogic.ir` certs.
+
 Copy the script from this repo:
 
 ```bash
