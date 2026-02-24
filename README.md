@@ -190,9 +190,20 @@ Key steps:
    SCRIPT
    chmod 750 /usr/local/bin/lego-post-hook.sh
    ```
-   Wire the hook into the renew cron:
+   Wire the hook into the renew cron with a wrapper script:
    ```bash
-   30 3 * * * root . /etc/letsencrypt/lego/arvancloud.env && /usr/local/bin/lego --dns arvancloud --domains digitalogic.ir --domains '*.digitalogic.ir' --email mahdielector@hotmail.com --accept-tos --path /etc/letsencrypt/lego renew --days 30 && /usr/local/bin/lego-sync-digitalogic.sh && /usr/local/bin/lego-post-hook.sh && systemctl reload apache2
+   cat > /usr/local/bin/lego-renew-digitalogic.sh <<'SCRIPT'
+   #!/usr/bin/env bash
+   set -euo pipefail
+   . /etc/letsencrypt/lego/arvancloud.env
+   /usr/local/bin/lego --dns arvancloud --domains digitalogic.ir --domains '*.digitalogic.ir' --email mahdielector@hotmail.com --accept-tos --path /etc/letsencrypt/lego renew --days 30
+   /usr/local/bin/lego-sync-digitalogic.sh
+   /usr/local/bin/lego-post-hook.sh
+   systemctl reload apache2
+   SCRIPT
+   chmod 750 /usr/local/bin/lego-renew-digitalogic.sh
+
+   30 3 * * * root /usr/local/bin/lego-renew-digitalogic.sh
    # If lego renew fails, the previous cert remains; rerun lego-sync/lego-post-hook manually after resolving the error.
    ```
 
