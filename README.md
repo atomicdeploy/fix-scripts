@@ -144,9 +144,16 @@ Key steps:
 6. **Wildcard cert with lego (recommended)**: `certbot-dns-arvancloud` is deprecated, so use `lego` with ArvanCloud DNS.
    ```bash
    # install lego
-   curl -s https://api.github.com/repos/go-acme/lego/releases/latest | python3 -c "import json,sys; print(json.load(sys.stdin)['tag_name'])"
-   # download the release and install /usr/local/bin/lego (see runbook)
+   TAG=$(curl -s https://api.github.com/repos/go-acme/lego/releases/latest | python3 -c "import json,sys; print(json.load(sys.stdin)['tag_name'])")
+   FILE="lego_${TAG}_linux_amd64.tar.gz"
+   URL="https://github.com/go-acme/lego/releases/download/${TAG}/${FILE}"
+   TMP=$(mktemp -d)
+   curl -fsSL "$URL" -o "$TMP/$FILE"
+   tar -xzf "$TMP/$FILE" -C "$TMP"
+   install -m 755 "$TMP/lego" /usr/local/bin/lego
+   rm -rf "$TMP"
 
+   # /tmp/arvancloud_key.txt should contain: "apikey <token>" on a single line
    export ARVANCLOUD_API_KEY=$(awk '{print $2}' /tmp/arvancloud_key.txt)
    /usr/local/bin/lego --dns arvancloud \
      --domains digitalogic.ir \
