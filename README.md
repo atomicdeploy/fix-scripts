@@ -145,6 +145,10 @@ Key steps:
    ```bash
    # install lego
    TAG=$(curl -s https://api.github.com/repos/go-acme/lego/releases/latest | python3 -c "import json,sys; print(json.load(sys.stdin)['tag_name'])")
+   if [ -z "$TAG" ]; then
+     echo "Failed to determine lego release tag" >&2
+     exit 1
+   fi
    FILE="lego_${TAG}_linux_amd64.tar.gz"
    URL="https://github.com/go-acme/lego/releases/download/${TAG}/${FILE}"
    TMP=$(mktemp -d)
@@ -153,7 +157,7 @@ Key steps:
    install -m 755 "$TMP/lego" /usr/local/bin/lego
    rm -rf "$TMP"
 
-   # /tmp/arvancloud_key.txt should contain: "apikey <token>" on a single line
+   # /tmp/arvancloud_key.txt should contain: "apikey YOUR_TOKEN_HERE" on a single line
    export ARVANCLOUD_API_KEY=$(awk '{print $2}' /tmp/arvancloud_key.txt)
    /usr/local/bin/lego --dns arvancloud \
      --domains digitalogic.ir \
