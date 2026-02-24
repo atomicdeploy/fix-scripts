@@ -175,6 +175,25 @@ Key steps:
    ```
    If `/root/.lego` exists from a prior run, move it into `/etc/letsencrypt/lego` and remove the old path.
 
+7. **Post-renew hooks**: generate a combined PEM, update Webmin, and notify a webhook.
+   ```bash
+   cat > /usr/local/bin/lego-post-hook.sh <<'SCRIPT'
+   #!/usr/bin/env bash
+   set -euo pipefail
+   live_dir=/etc/letsencrypt/live/digitalogic.ir
+   combined=$live_dir/combined.pem
+   cat "$live_dir/fullchain.pem" "$live_dir/privkey.pem" > "$combined"
+   chmod 600 "$combined"
+   ln -sf "$combined" /etc/webmin/miniserv.pem
+   curl -fsS -X POST https://automation.digitalogic.ir/webhook/cert-renew || true
+   SCRIPT
+   chmod 750 /usr/local/bin/lego-post-hook.sh
+   ```
+   Wire the hook into the renew cron:
+   ```bash
+   30 3 * * * root . /etc/letsencrypt/lego/arvancloud.env && /usr/local/bin/lego --dns arvancloud --domains digitalogic.ir --domains '*.digitalogic.ir' --email mahdielector@hotmail.com --accept-tos --path /etc/letsencrypt/lego renew --days 30 && /usr/local/bin/lego-sync-digitalogic.sh && /usr/local/bin/lego-post-hook.sh && systemctl reload apache2
+   ```
+
 Copy the script from this repo:
 
 ```bash
